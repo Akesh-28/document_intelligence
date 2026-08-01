@@ -1,5 +1,11 @@
+import os
 import hashlib
 from typing import List
+
+# Enforce thread restrictions BEFORE importing heavy ML frameworks
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+
 from fastapi import FastAPI, UploadFile, File, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -48,6 +54,12 @@ class DeleteResponse(BaseModel):
 
 
 # --- API Endpoints ---
+
+@app.get("/health", status_code=status.HTTP_200_OK, summary="Health Check")
+async def health_check():
+    """Lightweight endpoint for deployment probes."""
+    return {"status": "ok"}
+
 
 @app.post(
     "/api/v1/documents/upload", 
@@ -169,4 +181,4 @@ async def delete_document(doc_id: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("backend.main:app", host="127.0.0.1", port=8000, reload=False)
