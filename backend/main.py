@@ -14,7 +14,6 @@ from backend.services.ingestion import process_and_chunk_document
 from backend.services.vector_store import vector_store_service
 from backend.services.rag import get_rag_service
 
-# Centralized schemas
 from backend.models.schemas import (
     QueryRequest,
     QueryResponse,
@@ -57,7 +56,7 @@ class DeleteResponse(BaseModel):
 
 @app.get("/health", status_code=status.HTTP_200_OK, summary="Health Check")
 async def health_check():
-    """Lightweight endpoint for deployment probes."""
+    """Liveness and readiness probe for Docker / Render container health checks."""
     return {"status": "ok"}
 
 
@@ -88,20 +87,17 @@ async def upload_document(file: UploadFile = File(...)):
     file_bytes = await file.read()
     
     try:
-        # Pre-compute hash and purge existing duplicate document vectors if matching hash exists
         content_hash = hashlib.sha256(file_bytes).hexdigest()
         existing_doc_id = vector_store_service.find_document_by_hash(content_hash)
         
         if existing_doc_id:
             vector_store_service.delete_document_by_id(existing_doc_id)
 
-        # Process, parse, and chunk document
         doc_id, chunks, metadatas, total_pages = process_and_chunk_document(
             file_bytes=file_bytes,
             filename=file.filename
         )
         
-        # Add to ChromaDB vector store
         vector_store_service.add_documents(chunks=chunks, metadatas=metadatas)
         
         doc_metadata = DocumentMetadata(
