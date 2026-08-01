@@ -10,8 +10,16 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# API Endpoint Base URL (Dynamic Environment Variable)
-BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000/api/v1").rstrip("/")
+# --- DYNAMIC BACKEND URL RESOLUTION ---
+# Priority: Streamlit Secrets -> Environment Variable -> Localhost Default
+if "BACKEND_URL" in st.secrets:
+    BASE_URL = st.secrets["BACKEND_URL"]
+else:
+    BASE_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000/api/v1")
+
+BACKEND_URL = BASE_URL.rstrip("/")
+if not BACKEND_URL.endswith("/api/v1"):
+    BACKEND_URL = f"{BACKEND_URL}/api/v1"
 
 # --- CUSTOM CSS STYLING ---
 st.markdown("""
@@ -60,7 +68,7 @@ st.caption("Hybrid RAG with Re-ranking, Latency Tracing & Token Cost Analysis")
 def fetch_indexed_documents():
     """Fetch list of active indexed files from backend API."""
     try:
-        res = requests.get(f"{BACKEND_URL}/documents")
+        res = requests.get(f"{BACKEND_URL}/documents", timeout=10)
         if res.status_code == 200:
             return res.json()
         return []
@@ -71,7 +79,7 @@ def fetch_indexed_documents():
 def delete_document(doc_id: str):
     """Delete document from vector store via API."""
     try:
-        res = requests.delete(f"{BACKEND_URL}/documents/{doc_id}")
+        res = requests.delete(f"{BACKEND_URL}/documents/{doc_id}", timeout=10)
         return res.status_code == 200
     except Exception:
         return False
@@ -144,7 +152,7 @@ with st.sidebar:
             with st.spinner("Processing & indexing vectors..."):
                 try:
                     files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
-                    res = requests.post(f"{BACKEND_URL}/documents/upload", files=files)
+                    res = requests.post(f"{BACKEND_URL}/documents/upload", files=files, timeout=60)
 
                     if res.status_code == 200:
                         st.success(f"Successfully indexed: {uploaded_file.name}")
@@ -152,7 +160,7 @@ with st.sidebar:
                     else:
                         st.error(f"Upload failed ({res.status_code}): {res.json().get('detail', 'Unknown error')}")
                 except Exception as e:
-                    st.error(f"Could not connect to backend API: {e}")
+                    st.error(f"Could not connect to backend API at {BACKEND_URL}: {e}")
 
     st.divider()
 
@@ -199,7 +207,7 @@ if submit_btn and query_input.strip():
                 "top_k": top_k
             }
             
-            response = requests.post(f"{BACKEND_URL}/query", json=payload)
+            response = requests.post(f"{BACKEND_URL}/query", json=payload, timeout=60)
             
             if response.status_code == 200:
                 data = response.json()
@@ -313,4 +321,4 @@ if submit_btn and query_input.strip():
                 st.error(f"Error {response.status_code}: {response.json().get('detail', 'Backend server error')}")
 
         except Exception as e:
-            st.error(f"Failed to query backend server. Make sure FastAPI server is running on port 8000. Error: {e}")
+            st.error(f"Failed to query backend server at {BACKEND_URL}. Error: {e}")
