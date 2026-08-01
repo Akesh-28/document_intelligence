@@ -4,9 +4,10 @@ emoji: 🧠
 colorFrom: blue
 colorTo: indigo
 sdk: docker
-app_port: 8000
+app_port: 7860
 pinned: false
 ---
+
 # Intelligent Document Understanding Platform
 
 A hybrid-retrieval RAG platform for ingesting, indexing, and querying documents (PDF, TXT, Markdown, CSV) with full source citation, cross-encoder re-ranking, and end-to-end execution telemetry.
