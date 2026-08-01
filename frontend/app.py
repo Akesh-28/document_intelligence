@@ -1,5 +1,6 @@
-import streamlit as st
+import os
 import requests
+import streamlit as st
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
@@ -9,8 +10,8 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# API Endpoint Base URL
-API_URL = "http://127.0.0.1:8000/api/v1"
+# API Endpoint Base URL (Dynamic Environment Variable)
+BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000/api/v1").rstrip("/")
 
 # --- CUSTOM CSS STYLING ---
 st.markdown("""
@@ -59,7 +60,7 @@ st.caption("Hybrid RAG with Re-ranking, Latency Tracing & Token Cost Analysis")
 def fetch_indexed_documents():
     """Fetch list of active indexed files from backend API."""
     try:
-        res = requests.get(f"{API_URL}/documents")
+        res = requests.get(f"{BACKEND_URL}/documents")
         if res.status_code == 200:
             return res.json()
         return []
@@ -70,7 +71,7 @@ def fetch_indexed_documents():
 def delete_document(doc_id: str):
     """Delete document from vector store via API."""
     try:
-        res = requests.delete(f"{API_URL}/documents/{doc_id}")
+        res = requests.delete(f"{BACKEND_URL}/documents/{doc_id}")
         return res.status_code == 200
     except Exception:
         return False
@@ -105,11 +106,9 @@ def render_citations(citations: list[dict]):
             else:
                 location_str = "N/A"
             
-            # Confidence score is normalized to 0-100 float
             score = cite.get("relevance_score", 0.0)
             badge_text, badge_color = get_confidence_badge(score)
             
-            # Formatted Header
             header_col1, header_col2 = st.columns([3, 1])
             with header_col1:
                 st.markdown(f"**{idx}. 📄 {file_name}** `({location_str})`")
@@ -120,7 +119,6 @@ def render_citations(citations: list[dict]):
                     unsafe_allow_html=True
                 )
 
-            # Display Text Snippet
             st.caption(f'"{cite.get("text_snippet", "").strip()}"')
             if idx < len(citations):
                 st.divider()
@@ -146,11 +144,11 @@ with st.sidebar:
             with st.spinner("Processing & indexing vectors..."):
                 try:
                     files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
-                    res = requests.post(f"{API_URL}/documents/upload", files=files)
+                    res = requests.post(f"{BACKEND_URL}/documents/upload", files=files)
 
                     if res.status_code == 200:
                         st.success(f"Successfully indexed: {uploaded_file.name}")
-                        st.rerun()  # Refresh sidebar list
+                        st.rerun()
                     else:
                         st.error(f"Upload failed ({res.status_code}): {res.json().get('detail', 'Unknown error')}")
                 except Exception as e:
@@ -158,9 +156,7 @@ with st.sidebar:
 
     st.divider()
 
-    # --- INDEXED DOCUMENTS MANAGER ---
     st.subheader("📚 Active Indexed Documents")
-    
     indexed_docs = fetch_indexed_documents()
     
     if not indexed_docs:
@@ -203,7 +199,7 @@ if submit_btn and query_input.strip():
                 "top_k": top_k
             }
             
-            response = requests.post(f"{API_URL}/query", json=payload)
+            response = requests.post(f"{BACKEND_URL}/query", json=payload)
             
             if response.status_code == 200:
                 data = response.json()
@@ -212,13 +208,11 @@ if submit_btn and query_input.strip():
                 metrics = data.get("metrics", {})
                 retrieval_breakdown = metrics.get("retrieval_breakdown", {})
 
-                # --- 1. RESPONSE DISPLAY ---
                 st.subheader("🤖 Generated Answer")
                 st.markdown(f"> {answer}")
 
                 st.divider()
 
-                # --- 2. TELEMETRY & OBSERVABILITY DASHBOARD ---
                 st.subheader("📊 Execution Telemetry & Latency Breakdown")
                 
                 m1, m2, m3, m4, m5 = st.columns(5)
@@ -266,7 +260,6 @@ if submit_btn and query_input.strip():
                     </div>
                     """, unsafe_allow_html=True)
 
-                # Granular Retrieval Latency Deep Dive
                 if retrieval_breakdown:
                     with st.expander("🔍 Detailed Retrieval Stage Latency Breakdown", expanded=False):
                         r1, r2, r3, r4, r5 = st.columns(5)
@@ -306,7 +299,6 @@ if submit_btn and query_input.strip():
                             </div>
                             """, unsafe_allow_html=True)
 
-                # Visual Latency Progress Bar
                 total_t = max(metrics.get('total_latency_ms', 1.0), 1.0)
                 ret_pct = int((metrics.get('retrieval_latency_ms', 0) / total_t) * 100)
                 llm_pct = int((metrics.get('llm_latency_ms', 0) / total_t) * 100)
@@ -315,7 +307,6 @@ if submit_btn and query_input.strip():
 
                 st.divider()
 
-                # --- 3. CITATIONS & RE-RANKER SCORES ---
                 render_citations(citations)
 
             else:
