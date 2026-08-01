@@ -10,7 +10,7 @@ st.set_page_config(
 )
 
 # API Endpoint Base URL
-API_URL = "http://localhost:8000/api/v1"
+API_URL = "http://127.0.0.1:8000/api/v1"
 
 # --- CUSTOM CSS STYLING ---
 st.markdown("""
