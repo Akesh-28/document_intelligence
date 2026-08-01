@@ -11,11 +11,15 @@ st.set_page_config(
 )
 
 # --- DYNAMIC BACKEND URL RESOLUTION ---
-# Priority: Streamlit Secrets -> Environment Variable -> Localhost Default
-if "BACKEND_URL" in st.secrets:
-    BASE_URL = st.secrets["BACKEND_URL"]
-else:
-    BASE_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000/api/v1")
+# Safe Streamlit secrets lookup without raising StreamlitSecretNotFoundError
+backend_url_secret = None
+try:
+    if hasattr(st, "secrets") and "BACKEND_URL" in st.secrets:
+        backend_url_secret = st.secrets["BACKEND_URL"]
+except Exception:
+    backend_url_secret = None
+
+BASE_URL = backend_url_secret or os.getenv("BACKEND_URL", "http://127.0.0.1:8000/api/v1")
 
 BACKEND_URL = BASE_URL.rstrip("/")
 if not BACKEND_URL.endswith("/api/v1"):
@@ -115,7 +119,10 @@ def render_citations(citations: list[dict]):
                 location_str = "N/A"
             
             score = cite.get("relevance_score", 0.0)
-            badge_text, badge_color = get_confidence_badge(score)
+            # Check if relevance score is scaled 0.0–1.0 or 0–100
+            score_pct = score if score > 1.0 else score * 100.0
+            
+            badge_text, badge_color = get_confidence_badge(score_pct)
             
             header_col1, header_col2 = st.columns([3, 1])
             with header_col1:
@@ -123,7 +130,7 @@ def render_citations(citations: list[dict]):
             with header_col2:
                 st.markdown(
                     f"<span style='color: {badge_color}; font-weight: bold; float: right;'>"
-                    f"{badge_text} ({score:.1f}%)</span>",
+                    f"{badge_text} ({score_pct:.1f}%)</span>",
                     unsafe_allow_html=True
                 )
 
@@ -199,126 +206,139 @@ col_run, _ = st.columns([1, 5])
 with col_run:
     submit_btn = st.button("🚀 Execute Query", type="primary")
 
-if submit_btn and query_input.strip():
-    with st.spinner("Running Dense Search + BM25 + Cross-Encoder Rerank + LLM..."):
-        try:
-            payload = {
-                "prompt": query_input,
-                "top_k": top_k
-            }
-            
-            response = requests.post(f"{BACKEND_URL}/query", json=payload, timeout=60)
-            
-            if response.status_code == 200:
-                data = response.json()
-                answer = data.get("answer", "")
-                citations = data.get("citations", [])
-                metrics = data.get("metrics", {})
-                retrieval_breakdown = metrics.get("retrieval_breakdown", {})
-
-                st.subheader("🤖 Generated Answer")
-                st.markdown(f"> {answer}")
-
-                st.divider()
-
-                st.subheader("📊 Execution Telemetry & Latency Breakdown")
+if submit_btn:
+    cleaned_query = query_input.strip()
+    if not cleaned_query:
+        st.warning("⚠️ Please enter a query before submitting.")
+    elif len(cleaned_query) < 3:
+        st.warning("⚠️ Query must be at least 3 characters long.")
+    else:
+        with st.spinner("Running Dense Search + BM25 + Cross-Encoder Rerank + LLM..."):
+            try:
+                payload = {
+                    "prompt": cleaned_query,
+                    "top_k": top_k
+                }
                 
-                m1, m2, m3, m4, m5 = st.columns(5)
+                response = requests.post(f"{BACKEND_URL}/query", json=payload, timeout=60)
                 
-                with m1:
-                    st.markdown(f"""
-                    <div class="metric-card">
-                        <div class="metric-label">Retrieval Time</div>
-                        <div class="metric-value">{metrics.get('retrieval_latency_ms', 0):.1f} ms</div>
-                    </div>
-                    """, unsafe_allow_html=True)
+                if response.status_code == 200:
+                    data = response.json()
+                    answer = data.get("answer", "")
+                    citations = data.get("citations", [])
+                    metrics = data.get("metrics", {})
+                    retrieval_breakdown = metrics.get("retrieval_breakdown", {})
+
+                    st.subheader("🤖 Generated Answer")
+                    st.markdown(f"> {answer}")
+
+                    st.divider()
+
+                    st.subheader("📊 Execution Telemetry & Latency Breakdown")
                     
-                with m2:
-                    st.markdown(f"""
-                    <div class="metric-card">
-                        <div class="metric-label">LLM Latency</div>
-                        <div class="metric-value">{metrics.get('llm_latency_ms', 0):.1f} ms</div>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    m1, m2, m3, m4, m5 = st.columns(5)
+                    
+                    with m1:
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <div class="metric-label">Retrieval Time</div>
+                            <div class="metric-value">{metrics.get('retrieval_latency_ms', 0):.1f} ms</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                    with m2:
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <div class="metric-label">LLM Latency</div>
+                            <div class="metric-value">{metrics.get('llm_latency_ms', 0):.1f} ms</div>
+                        </div>
+                        """, unsafe_allow_html=True)
 
-                with m3:
-                    st.markdown(f"""
-                    <div class="metric-card">
-                        <div class="metric-label">Total Latency</div>
-                        <div class="metric-value">{metrics.get('total_latency_ms', 0):.1f} ms</div>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    with m3:
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <div class="metric-label">Total Latency</div>
+                            <div class="metric-value">{metrics.get('total_latency_ms', 0):.1f} ms</div>
+                        </div>
+                        """, unsafe_allow_html=True)
 
-                with m4:
-                    prompt_toks = metrics.get('prompt_tokens', 0)
-                    compl_toks = metrics.get('completion_tokens', 0)
-                    st.markdown(f"""
-                    <div class="metric-card">
-                        <div class="metric-label">Total Tokens</div>
-                        <div class="metric-value">{prompt_toks + compl_toks}</div>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    with m4:
+                        prompt_toks = metrics.get('prompt_tokens', 0)
+                        compl_toks = metrics.get('completion_tokens', 0)
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <div class="metric-label">Total Tokens</div>
+                            <div class="metric-value">{prompt_toks + compl_toks}</div>
+                        </div>
+                        """, unsafe_allow_html=True)
 
-                with m5:
-                    cost = metrics.get('estimated_cost_usd', 0.0)
-                    st.markdown(f"""
-                    <div class="metric-card">
-                        <div class="metric-label">Est. Cost</div>
-                        <div class="metric-value">${cost:.6f}</div>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    with m5:
+                        cost = metrics.get('estimated_cost_usd', 0.0)
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <div class="metric-label">Est. Cost</div>
+                            <div class="metric-value">${cost:.6f}</div>
+                        </div>
+                        """, unsafe_allow_html=True)
 
-                if retrieval_breakdown:
-                    with st.expander("🔍 Detailed Retrieval Stage Latency Breakdown", expanded=False):
-                        r1, r2, r3, r4, r5 = st.columns(5)
-                        with r1:
-                            st.markdown(f"""
-                            <div class="sub-metric-card">
-                                <div class="sub-metric-label">Dense Encode</div>
-                                <div class="sub-metric-value">{retrieval_breakdown.get('dense_ms', 0.0):.1f} ms</div>
-                            </div>
-                            """, unsafe_allow_html=True)
-                        with r2:
-                            st.markdown(f"""
-                            <div class="sub-metric-card">
-                                <div class="sub-metric-label">ChromaDB I/O</div>
-                                <div class="sub-metric-value">{retrieval_breakdown.get('chroma_io_ms', 0.0):.1f} ms</div>
-                            </div>
-                            """, unsafe_allow_html=True)
-                        with r3:
-                            st.markdown(f"""
-                            <div class="sub-metric-card">
-                                <div class="sub-metric-label">BM25 Lookup</div>
-                                <div class="sub-metric-value">{retrieval_breakdown.get('bm25_ms', 0.0):.1f} ms</div>
-                            </div>
-                            """, unsafe_allow_html=True)
-                        with r4:
-                            st.markdown(f"""
-                            <div class="sub-metric-card">
-                                <div class="sub-metric-label">RRF Fusion</div>
-                                <div class="sub-metric-value">{retrieval_breakdown.get('fusion_ms', 0.0):.1f} ms</div>
-                            </div>
-                            """, unsafe_allow_html=True)
-                        with r5:
-                            st.markdown(f"""
-                            <div class="sub-metric-card">
-                                <div class="sub-metric-label">Reranking</div>
-                                <div class="sub-metric-value">{retrieval_breakdown.get('rerank_ms', 0.0):.1f} ms</div>
-                            </div>
-                            """, unsafe_allow_html=True)
+                    if retrieval_breakdown:
+                        with st.expander("🔍 Detailed Retrieval Stage Latency Breakdown", expanded=False):
+                            r1, r2, r3, r4, r5 = st.columns(5)
+                            with r1:
+                                st.markdown(f"""
+                                <div class="sub-metric-card">
+                                    <div class="sub-metric-label">Dense Encode</div>
+                                    <div class="sub-metric-value">{retrieval_breakdown.get('dense_ms', 0.0):.1f} ms</div>
+                                </div>
+                                """, unsafe_allow_html=True)
+                            with r2:
+                                st.markdown(f"""
+                                <div class="sub-metric-card">
+                                    <div class="sub-metric-label">ChromaDB I/O</div>
+                                    <div class="sub-metric-value">{retrieval_breakdown.get('chroma_io_ms', 0.0):.1f} ms</div>
+                                </div>
+                                """, unsafe_allow_html=True)
+                            with r3:
+                                st.markdown(f"""
+                                <div class="sub-metric-card">
+                                    <div class="sub-metric-label">BM25 Lookup</div>
+                                    <div class="sub-metric-value">{retrieval_breakdown.get('bm25_ms', 0.0):.1f} ms</div>
+                                </div>
+                                """, unsafe_allow_html=True)
+                            with r4:
+                                st.markdown(f"""
+                                <div class="sub-metric-card">
+                                    <div class="sub-metric-label">RRF Fusion</div>
+                                    <div class="sub-metric-value">{retrieval_breakdown.get('fusion_ms', 0.0):.1f} ms</div>
+                                </div>
+                                """, unsafe_allow_html=True)
+                            with r5:
+                                st.markdown(f"""
+                                <div class="sub-metric-card">
+                                    <div class="sub-metric-label">Reranking</div>
+                                    <div class="sub-metric-value">{retrieval_breakdown.get('rerank_ms', 0.0):.1f} ms</div>
+                                </div>
+                                """, unsafe_allow_html=True)
 
-                total_t = max(metrics.get('total_latency_ms', 1.0), 1.0)
-                ret_pct = int((metrics.get('retrieval_latency_ms', 0) / total_t) * 100)
-                llm_pct = int((metrics.get('llm_latency_ms', 0) / total_t) * 100)
-                
-                st.caption(f"**Pipeline Execution Split:** Retrieval Phase ~{ret_pct}% | LLM Generation Phase ~{llm_pct}%")
+                    total_t = max(metrics.get('total_latency_ms', 1.0), 1.0)
+                    ret_pct = int((metrics.get('retrieval_latency_ms', 0) / total_t) * 100)
+                    llm_pct = int((metrics.get('llm_latency_ms', 0) / total_t) * 100)
+                    
+                    st.caption(f"**Pipeline Execution Split:** Retrieval Phase ~{ret_pct}% | LLM Generation Phase ~{llm_pct}%")
 
-                st.divider()
+                    st.divider()
 
-                render_citations(citations)
+                    render_citations(citations)
 
-            else:
-                st.error(f"Error {response.status_code}: {response.json().get('detail', 'Backend server error')}")
+                elif response.status_code == 422:
+                    error_detail = response.json().get("detail", [])
+                    if isinstance(error_detail, list) and len(error_detail) > 0:
+                        msg = error_detail[0].get("msg", "Validation Error")
+                    else:
+                        msg = str(error_detail)
+                    st.warning(f"⚠️ Validation Error: {msg}")
+                else:
+                    st.error(f"Error {response.status_code}: {response.json().get('detail', 'Backend server error')}")
 
-        except Exception as e:
-            st.error(f"Failed to query backend server at {BACKEND_URL}. Error: {e}")
+            except Exception as e:
+                st.error(f"Failed to query backend server at {BACKEND_URL}. Error: {e}")
