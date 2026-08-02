@@ -12,7 +12,7 @@ pinned: false
 
 A hybrid-retrieval RAG platform for ingesting, indexing, and querying documents (PDF, TXT, Markdown, CSV) with full source citation, cross-encoder re-ranking, and end-to-end execution telemetry.
 
----
+---🎥 **[Click here to watch the Project Demo Video](asstes/Video_Project.mp4)**
 
 ## 1. Overview
 
